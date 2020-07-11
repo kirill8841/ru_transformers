@@ -42,17 +42,17 @@ except:
 
 from tqdm import tqdm, trange
 from dataclasses import dataclass
-from fastprogress import progress_bar
+from fastprogress.fastprogress import progress_bar
 from fastai.basics import *
 
 from run_generation import sample_sequence
 
 from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup, get_constant_schedule, get_cosine_schedule_with_warmup,
-                                  BertConfig, BertForMaskedLM, BertTokenizer,
-                                  GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
-                                  OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer,
-                                  RobertaConfig, RobertaForMaskedLM, RobertaTokenizer,
-                                  DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
+                          BertConfig, BertForMaskedLM, BertTokenizer,
+                          GPT2Config, GPT2LMHeadModel, GPT2Tokenizer,
+                          OpenAIGPTConfig, OpenAIGPTLMHeadModel, OpenAIGPTTokenizer,
+                          RobertaConfig, RobertaForMaskedLM, RobertaTokenizer,
+                          DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
 
 from sp_encoder import SPEncoder
 from yt_encoder import YTEncoder
@@ -68,19 +68,23 @@ MODEL_CLASSES = {
     'distilbert': (DistilBertConfig, DistilBertForMaskedLM, DistilBertTokenizer)
 }
 
+
 @dataclass
 class MovingLoss():
-    steps:int=1000
+    steps: int = 1000
     avg_loss = (0.0, 0.0)
-    def add(self, batch_loss:float):
+
+    def add(self, batch_loss: float):
         k_s = 1 - 1/self.steps
         avg_loss = self.avg_loss
         self.avg_loss = (self.avg_loss[0] * k_s + batch_loss * (1-k_s),
                          self.avg_loss[1] * k_s + 1.0 * (1-k_s))
+
     @property
     def loss(self):
         if self.avg_loss[1]:
             return self.avg_loss[0] / self.avg_loss[1]
+
 
 def print_sample(model, tokenizer, device, args):
     model.eval()
@@ -99,11 +103,12 @@ def print_sample(model, tokenizer, device, args):
     out = out[0, len(context_tokens):].tolist()
     text = raw_text + tokenizer.decode(out)
     print(text)
-    
-    with open(os.path.join(args.output_dir, 'sample.txt'), 'w') as f: 
+
+    with open(os.path.join(args.output_dir, 'sample.txt'), 'w') as f:
         f.write(text)
-    
+
     model.train()
+
 
 class TextDataset(Dataset):
     @staticmethod
@@ -111,7 +116,8 @@ class TextDataset(Dataset):
         directory, filename = os.path.split(file_path)
         directory = os.path.join(directory, 'cached')
         os.makedirs(directory, exist_ok=True)
-        cached_features_file = os.path.join(directory, f'cached_lm_{block_size}_{tokenizer.hash}_{filename}')
+        cached_features_file = os.path.join(
+            directory, f'cached_lm_{block_size}_{tokenizer.hash}_{filename}')
 
         if os.path.exists(cached_features_file):
             with open(cached_features_file, 'rb') as handle:
@@ -121,41 +127,47 @@ class TextDataset(Dataset):
                 text = f.read()
             if hasattr(tokenizer, 'encode'):
                 tokenized_text = tokenizer.encode(text)
-            else: 
-                tokenized_text = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(text))
+            else:
+                tokenized_text = tokenizer.convert_tokens_to_ids(
+                    tokenizer.tokenize(text))
             with open(cached_features_file, 'wb') as handle:
-                pickle.dump(tokenized_text, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump(tokenized_text, handle,
+                            protocol=pickle.HIGHEST_PROTOCOL)
 
         examples = []
-        # add random shift 
+        # add random shift
         max_shift = max(min(block_size, len(tokenized_text) - block_size), 0)
         rnd_shift = random.randrange(max_shift) if max_shift and shuffle else 0
 
         for i in range(rnd_shift, len(tokenized_text)-block_size+1, block_size):
-            examples.append(tokenizer.add_special_tokens_single_sentence(tokenized_text[i:i+block_size]))
+            examples.append(tokenizer.add_special_tokens_single_sentence(
+                tokenized_text[i:i+block_size]))
         # Note that we are loosing the last truncated example here for the sake of simplicity (no padding)
         # If your dataset is small, first you should loook for a bigger one :-) and second you
         # can change this behavior by adding (model specific) padding.
         return examples
 
     def __init__(self, tokenizer, file_path='train', args=None, shuffle=True):
-        if not hasattr(tokenizer, 'hash'): tokenizer.hash = ''
+        if not hasattr(tokenizer, 'hash'):
+            tokenizer.hash = ''
 
         logger.info(f"Loading features from {file_path}")
         if os.path.isfile(file_path):
             files = [file_path]
         else:
             assert os.path.isdir(file_path)
-            files =  glob.glob(os.path.join(file_path, '*.txt'))
-        
+            files = glob.glob(os.path.join(file_path, '*.txt'))
+
         files = sorted(files)
-        if shuffle: random.shuffle(files)
-        
+        if shuffle:
+            random.shuffle(files)
+
         files = files[:10000]
 
         self.examples = []
         for fn in progress_bar(files):
-            self.examples.extend(self.process_file(fn, tokenizer, args.block_size, shuffle))
+            self.examples.extend(self.process_file(
+                fn, tokenizer, args.block_size, shuffle))
 
     def __len__(self):
         return len(self.examples)
@@ -165,17 +177,19 @@ class TextDataset(Dataset):
 
 
 def load_and_cache_examples(args, tokenizer, evaluate=False):
-    dataset = TextDataset(tokenizer, file_path=args.eval_data_file if evaluate else args.train_data_file, args=args, shuffle=not evaluate)
+    dataset = TextDataset(
+        tokenizer, file_path=args.eval_data_file if evaluate else args.train_data_file, args=args, shuffle=not evaluate)
     return dataset
 
 
 def set_seed(args):
-    return # no
+    return  # no
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     if args.n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
+
 
 def _rotate_checkpoints(args, checkpoint_prefix, use_mtime=False):
     if not args.save_total_limit:
@@ -184,7 +198,8 @@ def _rotate_checkpoints(args, checkpoint_prefix, use_mtime=False):
         return
 
     # Check if we should delete older checkpoint(s)
-    glob_checkpoints = glob.glob(os.path.join(args.output_dir, '{}-*'.format(checkpoint_prefix)))
+    glob_checkpoints = glob.glob(os.path.join(
+        args.output_dir, '{}-*'.format(checkpoint_prefix)))
     if len(glob_checkpoints) <= args.save_total_limit:
         return
 
@@ -193,16 +208,20 @@ def _rotate_checkpoints(args, checkpoint_prefix, use_mtime=False):
         if use_mtime:
             ordering_and_checkpoint_path.append((os.path.getmtime(path), path))
         else:
-            regex_match = re.match('.*{}-([0-9]+)'.format(checkpoint_prefix), path)
+            regex_match = re.match(
+                '.*{}-([0-9]+)'.format(checkpoint_prefix), path)
             if regex_match and regex_match.groups():
-                ordering_and_checkpoint_path.append((int(regex_match.groups()[0]), path))
+                ordering_and_checkpoint_path.append(
+                    (int(regex_match.groups()[0]), path))
 
     checkpoints_sorted = sorted(ordering_and_checkpoint_path)
     checkpoints_sorted = [checkpoint[1] for checkpoint in checkpoints_sorted]
-    number_of_checkpoints_to_delete = max(0, len(checkpoints_sorted) - args.save_total_limit)
+    number_of_checkpoints_to_delete = max(
+        0, len(checkpoints_sorted) - args.save_total_limit)
     checkpoints_to_be_deleted = checkpoints_sorted[:number_of_checkpoints_to_delete]
     for checkpoint in checkpoints_to_be_deleted:
-        logger.info("Deleting older checkpoint [{}] due to args.save_total_limit".format(checkpoint))
+        logger.info(
+            "Deleting older checkpoint [{}] due to args.save_total_limit".format(checkpoint))
         shutil.rmtree(checkpoint)
 
 
@@ -211,22 +230,29 @@ def mask_tokens(inputs, tokenizer, args):
     labels = inputs.clone()
     # We sample a few tokens in each sequence for masked-LM training (with probability args.mlm_probability defaults to 0.15 in Bert/RoBERTa)
     probability_matrix = torch.full(labels.shape, args.mlm_probability)
-    special_tokens_mask = [tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()]
-    probability_matrix.masked_fill_(torch.tensor(special_tokens_mask, dtype=torch.bool), value=0.0)
+    special_tokens_mask = [tokenizer.get_special_tokens_mask(
+        val, already_has_special_tokens=True) for val in labels.tolist()]
+    probability_matrix.masked_fill_(torch.tensor(
+        special_tokens_mask, dtype=torch.bool), value=0.0)
     masked_indices = torch.bernoulli(probability_matrix).bool()
     labels[~masked_indices] = -1  # We only compute loss on masked tokens
 
     # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-    indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
-    inputs[indices_replaced] = tokenizer.convert_tokens_to_ids(tokenizer.mask_token)
+    indices_replaced = torch.bernoulli(torch.full(
+        labels.shape, 0.8)).bool() & masked_indices
+    inputs[indices_replaced] = tokenizer.convert_tokens_to_ids(
+        tokenizer.mask_token)
 
     # 10% of the time, we replace masked input tokens with random word
-    indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-    random_words = torch.randint(len(tokenizer), labels.shape, dtype=torch.long)
+    indices_random = torch.bernoulli(torch.full(
+        labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+    random_words = torch.randint(
+        len(tokenizer), labels.shape, dtype=torch.long)
     inputs[indices_random] = random_words[indices_random]
 
     # The rest of the time (10% of the time) we keep the masked input tokens unchanged
     return inputs, labels
+
 
 def save_state(args, model, tokenizer, global_step):
     def save_dir(output_dir):
@@ -236,19 +262,23 @@ def save_state(args, model, tokenizer, global_step):
         logger.info(f"Saving model checkpoint to {output_dir}")
         # Save a trained model, configuration and tokenizer using `save_pretrained()`.
         # They can then be reloaded using `from_pretrained()`
-        model_to_save = model.module if hasattr(model, 'module') else model  # Take care of distributed/parallel training
+        # Take care of distributed/parallel training
+        model_to_save = model.module if hasattr(model, 'module') else model
         model_to_save.save_pretrained(output_dir)
         tokenizer.save_pretrained(output_dir)
 
         # Good practice: save your training arguments together with the trained model
         torch.save(args, os.path.join(output_dir, 'training_args.bin'))
-        with open(os.path.join(output_dir, 'step.txt'), 'w') as c: c.write(str(global_step))
+        with open(os.path.join(output_dir, 'step.txt'), 'w') as c:
+            c.write(str(global_step))
 
     save_dir(args.output_dir)
     checkpoint_prefix = 'checkpoint'
-    output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}-{global_step}')
+    output_dir = os.path.join(
+        args.output_dir, f'{checkpoint_prefix}-{global_step}')
     save_dir(output_dir)
     _rotate_checkpoints(args, checkpoint_prefix)
+
 
 class SummaryWriterP(SummaryWriter):
     def __init__(self, prefix=None, logdir=None, comment='', *args, **kwargs):
@@ -256,9 +286,10 @@ class SummaryWriterP(SummaryWriter):
             import socket
             from datetime import datetime
             current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-            logdir = os.path.join(prefix, 
-                'runs', current_time + '_' + socket.gethostname() + comment)
-        super().__init__(logdir, comment, *args, **kwargs) 
+            logdir = os.path.join(prefix,
+                                  'runs', current_time + '_' + socket.gethostname() + comment)
+        super().__init__(logdir, comment, *args, **kwargs)
+
 
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
@@ -266,34 +297,44 @@ def train(args, train_dataset, model, tokenizer):
         tb_writer = SummaryWriterP(args.output_dir)
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
-    train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
-    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
+    train_sampler = RandomSampler(
+        train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
+    train_dataloader = DataLoader(
+        train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
 
     if args.max_steps > 0:
         t_total = args.max_steps
-        args.num_train_epochs = args.max_steps // (len(train_dataloader) // args.gradient_accumulation_steps) + 1
+        args.num_train_epochs = args.max_steps // (
+            len(train_dataloader) // args.gradient_accumulation_steps) + 1
     else:
-        t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
+        t_total = len(
+            train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if p.requires_grad and not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
-        {'params': [p for n, p in model.named_parameters() if p.requires_grad and any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-        ]
-    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+        {'params': [p for n, p in model.named_parameters() if p.requires_grad and not any(
+            nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
+        {'params': [p for n, p in model.named_parameters() if p.requires_grad and any(
+            nd in n for nd in no_decay)], 'weight_decay': 0.0}
+    ]
+    optimizer = AdamW(optimizer_grouped_parameters,
+                      lr=args.learning_rate, eps=args.adam_epsilon)
     warmup_steps = args.warmup_samples // args.train_batch_size
     if args.lr_decay:
-        scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps=warmup_steps, t_total=t_total)
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, warmup_steps=warmup_steps, t_total=t_total)
     else:
-        scheduler = get_constant_schedule(optimizer, warmup_steps=warmup_steps)
+        scheduler = get_constant_schedule(optimizer) # warmup_steps=warmup_steps)  -  got an error from 'transformers'
 
     if args.fp16:
         try:
             from apex import amp
         except ImportError:
-            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
-        model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level)
+            raise ImportError(
+                "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
+        model, optimizer = amp.initialize(
+            model, optimizer, opt_level=args.fp16_opt_level)
 
     # multi-gpu training (should be after apex fp16 initialization)
     if args.n_gpu > 1:
@@ -309,14 +350,16 @@ def train(args, train_dataset, model, tokenizer):
     logger.info("***** Running training *****")
     logger.info("  Num examples = %d", len(train_dataset))
     logger.info("  Num Epochs = %d", args.num_train_epochs)
-    logger.info("  Instantaneous batch size per GPU = %d", args.per_gpu_train_batch_size)
+    logger.info("  Instantaneous batch size per GPU = %d",
+                args.per_gpu_train_batch_size)
     logger.info("  Total train batch size (w. parallel, distributed & accumulation) = %d",
-                   args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
-    logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
+                args.train_batch_size * args.gradient_accumulation_steps * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
+    logger.info("  Gradient Accumulation steps = %d",
+                args.gradient_accumulation_steps)
     logger.info("  Total optimization steps = %d", t_total)
 
     try:
-        with open(os.path.join(args.model_name_or_path, 'step.txt'), 'r') as c: 
+        with open(os.path.join(args.model_name_or_path, 'step.txt'), 'r') as c:
             global_step = int(c.readline())
     except OSError as e:
         global_step = 0
@@ -325,18 +368,23 @@ def train(args, train_dataset, model, tokenizer):
     moving_loss = MovingLoss(10000//args.logging_steps)
     model.zero_grad()
 
-    train_iterator = trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0])
+    train_iterator = trange(int(args.num_train_epochs),
+                            desc="Epoch", disable=args.local_rank not in [-1, 0])
     set_seed(args)  # Added here for reproducibility (even between python 2 and 3)
-    try:    
+    try:
         for _ in train_iterator:
-            epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
+            epoch_iterator = tqdm(
+                train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
             for step, batch in enumerate(epoch_iterator):
-                inputs, labels = mask_tokens(batch, tokenizer, args) if args.mlm else (batch, batch)
+                inputs, labels = mask_tokens(
+                    batch, tokenizer, args) if args.mlm else (batch, batch)
                 inputs = inputs.to(args.device)
                 labels = labels.to(args.device)
                 model.train()
-                outputs = model(inputs, masked_lm_labels=labels) if args.mlm else model(inputs, labels=labels)
-                loss = outputs[0]  # model outputs are always tuple in pytorch-transformers (see doc)
+                outputs = model(inputs, masked_lm_labels=labels) if args.mlm else model(
+                    inputs, labels=labels)
+                # model outputs are always tuple in pytorch-transformers (see doc)
+                loss = outputs[0]
 
                 if args.n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -353,25 +401,33 @@ def train(args, train_dataset, model, tokenizer):
                 moving_loss.add(loss.item())
                 if (step + 1) % args.gradient_accumulation_steps == 0:
                     if args.fp16:
-                        torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
+                        torch.nn.utils.clip_grad_norm_(
+                            amp.master_params(optimizer), args.max_grad_norm)
                     else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(), args.max_grad_norm)
                     optimizer.step()
                     scheduler.step()  # Update learning rate schedule
                     model.zero_grad()
                     global_step += 1
 
                     # Log metrics
-                    if args.local_rank == -1 and args.evaluate_during_training and global_step % args.eval_steps == 0:  # Only evaluate when single GPU otherwise metrics may not average well
-                        results = evaluate(args, model, tokenizer, f"checkpoint-{global_step}")
+                    # Only evaluate when single GPU otherwise metrics may not average well
+                    if args.local_rank == -1 and args.evaluate_during_training and global_step % args.eval_steps == 0:
+                        results = evaluate(
+                            args, model, tokenizer, f"checkpoint-{global_step}")
                         for key, value in results.items():
-                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+                            tb_writer.add_scalar(
+                                'eval_{}'.format(key), value, global_step)
 
                     if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
-                        tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
-                        tb_writer.add_scalar('loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
+                        tb_writer.add_scalar(
+                            'lr', scheduler.get_lr()[0], global_step)
+                        tb_writer.add_scalar(
+                            'loss', (tr_loss - logging_loss)/args.logging_steps, global_step)
                         logging_loss = tr_loss
-                        epoch_iterator.set_postfix(MovingLoss=f'{moving_loss.loss:.2f}', Perplexity=f'{torch.exp(torch.tensor(moving_loss.loss)):.2f}')
+                        epoch_iterator.set_postfix(
+                            MovingLoss=f'{moving_loss.loss:.2f}', Perplexity=f'{torch.exp(torch.tensor(moving_loss.loss)):.2f}')
 
                     if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
                         # Save model checkpoint
@@ -405,8 +461,10 @@ def evaluate(args, model, tokenizer, prefix=""):
 
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
     # Note that DistributedSampler samples randomly
-    eval_sampler = SequentialSampler(eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
-    eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
+    eval_sampler = SequentialSampler(
+        eval_dataset) if args.local_rank == -1 else DistributedSampler(eval_dataset)
+    eval_dataloader = DataLoader(
+        eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
     # Eval!
     logger.info("***** Running evaluation {} *****".format(prefix))
@@ -420,9 +478,10 @@ def evaluate(args, model, tokenizer, prefix=""):
         batch = batch.to(args.device)
 
         with torch.no_grad():
-            outputs = model(batch, masked_lm_labels=batch) if args.mlm else model(batch, labels=batch)
+            outputs = model(batch, masked_lm_labels=batch) if args.mlm else model(
+                batch, labels=batch)
             lm_loss = outputs[0]
-            eval_loss += lm_loss.item() #lm_loss.mean().item()
+            eval_loss += lm_loss.item()  # lm_loss.mean().item()
         nb_eval_steps += 1
 
     eval_loss = eval_loss / nb_eval_steps
@@ -445,13 +504,13 @@ def evaluate(args, model, tokenizer, prefix=""):
 def main():
     parser = argparse.ArgumentParser()
 
-    ## Required parameters
+    # Required parameters
     parser.add_argument("--train_data_file", default=None, type=str, required=True,
                         help="The input training data file (a text file).")
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model predictions and checkpoints will be written.")
 
-    ## Other parameters
+    # Other parameters
     parser.add_argument("--eval_data_file", default=None, type=str,
                         help="An optional input evaluation data file to evaluate the perplexity on (a text file).")
 
@@ -538,8 +597,10 @@ def main():
                              "See details at https://nvidia.github.io/apex/amp.html")
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="For distributed training: local_rank")
-    parser.add_argument('--server_ip', type=str, default='', help="For distant debugging.")
-    parser.add_argument('--server_port', type=str, default='', help="For distant debugging.")
+    parser.add_argument('--server_ip', type=str, default='',
+                        help="For distant debugging.")
+    parser.add_argument('--server_port', type=str,
+                        default='', help="For distant debugging.")
     args = parser.parse_args()
 
     if args.model_type in ["bert", "roberta", "distilbert"] and not args.mlm:
@@ -550,19 +611,22 @@ def main():
                          "or remove the --do_eval argument.")
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train and not args.overwrite_output_dir:
-        raise ValueError(f"Output directory ({args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome.")
+        raise ValueError(
+            f"Output directory ({args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome.")
 
     # Setup distant debugging if needed
     if args.server_ip and args.server_port:
         # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
         import ptvsd
         print("Waiting for debugger attach")
-        ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
+        ptvsd.enable_attach(
+            address=(args.server_ip, args.server_port), redirect_output=True)
         ptvsd.wait_for_attach()
 
     # Setup CUDA, GPU & distributed training
     if args.local_rank == -1 or args.no_cuda:
-        device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+        device = torch.device(
+            "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
         args.n_gpu = torch.cuda.device_count()
     else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
         torch.cuda.set_device(args.local_rank)
@@ -572,71 +636,83 @@ def main():
     args.device = device
 
     # Setup logging
-    logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                        datefmt = '%m/%d/%Y %H:%M:%S',
-                        level = logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                        datefmt='%m/%d/%Y %H:%M:%S',
+                        level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
     logger.warning("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
-                    args.local_rank, args.device, args.n_gpu, bool(args.local_rank != -1), args.fp16)
+                   args.local_rank, args.device, args.n_gpu, bool(args.local_rank != -1), args.fp16)
 
     # Set seed
     set_seed(args)
 
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
-        torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training download model & vocab
-    
+        # Barrier to make sure only the first process in distributed training download model & vocab
+        torch.distributed.barrier()
+
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
-    config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
-    if args.tokenizer_class: tokenizer_class = globals()[args.tokenizer_class]
-    tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
+    config = config_class.from_pretrained(
+        args.config_name if args.config_name else args.model_name_or_path)
+    if args.tokenizer_class:
+        tokenizer_class = globals()[args.tokenizer_class]
+    tokenizer = tokenizer_class.from_pretrained(
+        args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case)
     if args.block_size <= 0:
-        args.block_size = tokenizer.max_len_single_sentence  # Our input block size will be the max possible for the model
+        # Our input block size will be the max possible for the model
+        args.block_size = tokenizer.max_len_single_sentence
     args.block_size = min(args.block_size, tokenizer.max_len_single_sentence)
-    model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
+    model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool(
+        '.ckpt' in args.model_name_or_path), config=config)
     model.to(args.device)
 
     print(200*'/')
-    print(len([param for item in flatten_model(model) 
-            for param in item.parameters()
-                if param.requires_grad]))    # freeze all layers but few first and last
+    print(len([param for item in flatten_model(model)
+               for param in item.parameters()
+               if param.requires_grad]))    # freeze all layers but few first and last
     if args.unfreeze_level >= 0:
         flat = flatten_model(model)
         flat = [item for item in flat if list(item.parameters())]
         i_start = 3
         i_end = 1
-        need_grads = set(flat[:i_start+args.unfreeze_level*3]) | set(flat[-(i_end+args.unfreeze_level*3):])
+        need_grads = set(flat[:i_start+args.unfreeze_level*3]
+                         ) | set(flat[-(i_end+args.unfreeze_level*3):])
         for item in flat:
             requires_grad(item, item in need_grads)
         print(200*'/')
-        print(len([param for item in flatten_model(model) 
-                for param in item.parameters()
-                    if param.requires_grad]))
+        print(len([param for item in flatten_model(model)
+                   for param in item.parameters()
+                   if param.requires_grad]))
 
     if args.local_rank == 0:
-        torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
+        # End of barrier to make sure only the first process in distributed training download model & vocab
+        torch.distributed.barrier()
 
     logger.info("Training/evaluation parameters %s", args)
 
     # Training
     if args.do_train:
         if args.local_rank not in [-1, 0]:
-            torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
+            # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
+            torch.distributed.barrier()
 
-        train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False)
+        train_dataset = load_and_cache_examples(
+            args, tokenizer, evaluate=False)
 
         if args.local_rank == 0:
             torch.distributed.barrier()
 
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
-        logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-        
+        logger.info(" global_step = %s, average loss = %s",
+                    global_step, tr_loss)
+
     # Saving best-practices: if you use save_pretrained for the model and tokenizer, you can reload them using from_pretrained()
     if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         save_state(args, model, tokenizer, global_step)
 
         # Load a trained model and vocabulary that you have fine-tuned
         model = model_class.from_pretrained(args.output_dir)
-        tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
+        tokenizer = tokenizer_class.from_pretrained(
+            args.output_dir, do_lower_case=args.do_lower_case)
         model.to(args.device)
 
     # Evaluation
@@ -644,15 +720,19 @@ def main():
     if args.do_eval and args.local_rank in [-1, 0]:
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
-            checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
-            logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+            checkpoints = list(os.path.dirname(c) for c in sorted(
+                glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
+            logging.getLogger("transformers.modeling_utils").setLevel(
+                logging.WARN)  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
-            global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
+            global_step = checkpoint.split(
+                '-')[-1] if len(checkpoints) > 1 else ""
             model = model_class.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, tokenizer, prefix=global_step)
-            result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
+            result = dict((k + '_{}'.format(global_step), v)
+                          for k, v in result.items())
             results.update(result)
 
     return results
